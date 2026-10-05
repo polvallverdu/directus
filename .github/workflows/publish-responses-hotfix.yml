@@ -1,0 +1,60 @@
+name: Publish Responses hotfix
+
+on:
+  push:
+    branches:
+      - hotfix/cloudrun-responses
+    paths:
+      - hotfix/responses/**
+      - .github/workflows/publish-responses-hotfix.yml
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: responses-hotfix-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'polvallverdu/directus'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE: ghcr.io/polvallverdu/directus
+      TAG: 12.4.1-responses-hotfix
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build amd64 image
+        run: |
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "${IMAGE}:${TAG}" \
+            -t "${IMAGE}:${TAG}-${GITHUB_SHA:0:12}" \
+            hotfix/responses
+
+      - name: Verify provider transport
+        run: |
+          docker run --rm --entrypoint node \
+            -v "${GITHUB_WORKSPACE}/hotfix/responses/verify.mjs:/tmp/verify.mjs:ro" \
+            "${IMAGE}:${TAG}" /tmp/verify.mjs
+
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish verified image
+        run: |
+          docker push "${IMAGE}:${TAG}-${GITHUB_SHA:0:12}"
+          docker push "${IMAGE}:${TAG}"
+          {
+            echo '## Published image'
+            echo "\`${IMAGE}:${TAG}\`"
+            echo "\`${IMAGE}:${TAG}-${GITHUB_SHA:0:12}\`"
+            echo 'Set package visibility to Public before deploying to Cloud Run.'
+          } >> "${GITHUB_STEP_SUMMARY}"
